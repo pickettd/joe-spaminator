@@ -34,6 +34,8 @@ Before running, you need:
 2. `.env` file with API key(s):
    - `GOOGLE_API_KEY=ya29.xxxxxxxxxxxxx` (for Gemini)
    - `OPENAI_API_KEY=sk-xxxxxxxxxxxxx` (for OpenAI, optional)
+   - `OPENAI_BASE_URL=https://api.openai.com/v1` (for OpenAI, optional - only needed for custom endpoints)
+   - `OPENAI_MODEL=gpt-4o-mini` (for OpenAI, optional - defaults to gpt-4o-mini)
 
 First run creates `token.json` after OAuth authorization.
 
@@ -79,9 +81,11 @@ The classifier supports two API providers via `--api` flag:
 
 **OpenAI**:
 - Uses official `openai` Python client
-- Model: `gpt-4o-mini`
+- Model: Configurable via `OPENAI_MODEL` (defaults to `gpt-4o-mini`)
 - Custom `openai_generate_json()` function
 - Requires `OPENAI_API_KEY` in `.env`
+- Optional `OPENAI_BASE_URL` for custom endpoints (e.g., OpenAI-compatible APIs like LM Studio, Ollama with openai-compatible server, etc.)
+- Optional `OPENAI_MODEL` to specify which model to use (useful for testing different models or local models)
 
 Both implementations:
 - Use `SYSTEM_RULES` for classification instructions

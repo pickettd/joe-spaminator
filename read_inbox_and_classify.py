@@ -105,11 +105,20 @@ def openai_generate_json(payload: dict) -> dict:
             "OPENAI_API_KEY not set. Add it to your .env file or set the env var."
         )
 
-    client = OpenAI(api_key=api_key)
+    # Optional: support custom base_url (e.g., for OpenAI-compatible APIs)
+    base_url = os.environ.get("OPENAI_BASE_URL")
+    client = (
+        OpenAI(api_key=api_key, base_url=base_url)
+        if base_url
+        else OpenAI(api_key=api_key)
+    )
+
+    # Optional: support custom model name (default: gpt-4o-mini)
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=model,
             temperature=0,
             response_format={"type": "json_object"},
             messages=[
