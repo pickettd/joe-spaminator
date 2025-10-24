@@ -9,6 +9,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 # Start read-only; later use gmail.modify when you want to change labels
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
+
 def get_creds():
     creds = None
     token_path = Path("token.json")
@@ -22,6 +23,7 @@ def get_creds():
             creds = flow.run_local_server(port=0)
         token_path.write_text(creds.to_json())
     return creds
+
 
 if __name__ == "__main__":
     c = get_creds()

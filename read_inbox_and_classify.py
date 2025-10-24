@@ -10,18 +10,35 @@ from pathlib import Path
 from dotenv import load_dotenv
 import json
 import requests
+import argparse
 
 SALES_PHRASES = [
-    "would you be interested", "quick call", "jump on a call", "book time",
-    "schedule a call", "pick a time", "calendly.com", "calendar link",
-    "case study", "pilot program", "free consultation", "special offer",
-    "limited time", "intro ", " x ",  # e.g., "Intro Foo x Bar"
-    "we help you", "we can book", "generate leads", "lead gen",
+    "would you be interested",
+    "quick call",
+    "jump on a call",
+    "book time",
+    "schedule a call",
+    "pick a time",
+    "calendly.com",
+    "calendar link",
+    "case study",
+    "pilot program",
+    "free consultation",
+    "special offer",
+    "limited time",
+    "intro ",
+    " x ",  # e.g., "Intro Foo x Bar"
+    "we help you",
+    "we can book",
+    "generate leads",
+    "lead gen",
 ]
+
 
 def looks_salesy(subject: str, snippet: str) -> bool:
     t = f"{subject} {snippet}".lower()
     return any(p in t for p in SALES_PHRASES)
+
 
 def gemini_generate_json(payload: dict) -> dict:
     """Call Gemini v1beta REST and return parsed JSON {label, reason}."""
@@ -29,22 +46,22 @@ def gemini_generate_json(payload: dict) -> dict:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
 
     body = {
-        "system_instruction": {
-            "role": "user",
-            "parts": [{"text": SYSTEM_RULES}]
+        "system_instruction": {"role": "user", "parts": [{"text": SYSTEM_RULES}]},
+        "generation_config": {
+            "temperature": 0,
+            "response_mime_type": "application/json",
         },
-        "generation_config": {"temperature": 0, "response_mime_type": "application/json"},
         "contents": [
             {
                 "role": "user",
-                "parts": [
-                    {"text": json.dumps(payload, ensure_ascii=False)}
-                ]
+                "parts": [{"text": json.dumps(payload, ensure_ascii=False)}],
             }
         ],
     }
 
-    r = requests.post(url, json=body, headers={"Content-Type": "application/json"}, timeout=30)
+    r = requests.post(
+        url, json=body, headers={"Content-Type": "application/json"}, timeout=30
+    )
     if r.status_code != 200:
         try:
             print("Gemini REST error:", r.status_code, r.json())
@@ -55,15 +72,16 @@ def gemini_generate_json(payload: dict) -> dict:
     data = r.json()
     text = (
         data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-            .strip()
+        .get("content", {})
+        .get("parts", [{}])[0]
+        .get("text", "")
+        .strip()
     )
     try:
         return json.loads(text)
     except Exception:
         import re
+
         m = re.search(r"\{.*\}", text, flags=re.S)
         if m:
             try:
@@ -73,8 +91,51 @@ def gemini_generate_json(payload: dict) -> dict:
         print("Warning: model returned non-JSON:", text[:200])
         return {"label": "NOT_SPAM", "reason": "non-json response"}
 
+
+def openai_generate_json(payload: dict) -> dict:
+    """Call OpenAI API and return parsed JSON {label, reason}."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise RuntimeError("openai package not installed. Run: pip install openai")
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY not set. Add it to your .env file or set the env var."
+        )
+
+    client = OpenAI(api_key=api_key)
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": SYSTEM_RULES},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+        )
+
+        text = response.choices[0].message.content.strip()
+        return json.loads(text)
+    except json.JSONDecodeError:
+        import re
+
+        m = re.search(r"\{.*\}", text, flags=re.S)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                pass
+        print("Warning: model returned non-JSON:", text[:200])
+        return {"label": "NOT_SPAM", "reason": "non-json response"}
+
+
 # ---- Globals ----------------------------------------------------------------
 _SERVICE = None  # will be set in main()
+_API_PROVIDER = "gemini"  # will be set by command-line arg: "gemini" or "openai"
 MAX_BODY_CHARS = 2000  # safe default for trimming long message bodies
 
 # ---- Gemini setup ------------------------------------------------------------
@@ -104,45 +165,68 @@ No extra text.
 # Require the API key to be present and fail early with a clear message.
 API_KEY = os.environ.get("GOOGLE_API_KEY")
 if not API_KEY:
-    raise RuntimeError("GOOGLE_API_KEY not set. Create a .env file or set the env var before running the script.")
+    raise RuntimeError(
+        "GOOGLE_API_KEY not set. Create a .env file or set the env var before running the script."
+    )
+
 
 def redact(text: str) -> str:
     return text.replace("\r", " ").replace("\n", " ").strip()
 
+
 # ---- Gmail helpers -----------------------------------------------------------
 def list_message_ids(service, q: str = "in:inbox", max_results: int = 20) -> List[str]:
-    resp = service.users().messages().list(userId="me", q=q, maxResults=max_results).execute()
+    resp = (
+        service.users()
+        .messages()
+        .list(userId="me", q=q, maxResults=max_results)
+        .execute()
+    )
     return [m["id"] for m in resp.get("messages", [])]
+
 
 def sender_matches(email_from: str, needles: list[str]) -> bool:
     f = (email_from or "").lower()
     return any(n in f for n in needles)
 
+
 def get_message_meta(service, msg_id: str) -> Dict[str, Any]:
-    msg = service.users().messages().get(
-        userId="me", id=msg_id, format="metadata",
-        metadataHeaders=["From", "Subject", "Date"]
-    ).execute()
+    msg = (
+        service.users()
+        .messages()
+        .get(
+            userId="me",
+            id=msg_id,
+            format="metadata",
+            metadataHeaders=["From", "Subject", "Date"],
+        )
+        .execute()
+    )
     headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
     return {
         "id": msg_id,
         "from": headers.get("From", ""),
         "subject": headers.get("Subject", ""),
         "date": headers.get("Date", ""),
-        "snippet": msg.get("snippet", "")
+        "snippet": msg.get("snippet", ""),
     }
+
 
 def get_plaintext_body(service=None, msg_id: str = "") -> str:
     """Return the plain-text body of an email."""
     service = service or _SERVICE
     if not service or not msg_id:
         return ""
-    msg = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
+    msg = (
+        service.users().messages().get(userId="me", id=msg_id, format="full").execute()
+    )
 
     def walk(parts):
         for p in parts:
             if p.get("mimeType") == "text/plain" and "data" in p.get("body", {}):
-                return base64.urlsafe_b64decode(p["body"]["data"]).decode("utf-8", errors="ignore")
+                return base64.urlsafe_b64decode(p["body"]["data"]).decode(
+                    "utf-8", errors="ignore"
+                )
             if "parts" in p:
                 content = walk(p["parts"])
                 if content:
@@ -151,11 +235,15 @@ def get_plaintext_body(service=None, msg_id: str = "") -> str:
 
     payload = msg.get("payload", {})
     if payload.get("mimeType") == "text/plain" and "data" in payload.get("body", {}):
-        return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="ignore")
+        return base64.urlsafe_b64decode(payload["body"]["data"]).decode(
+            "utf-8", errors="ignore"
+        )
     return walk(payload.get("parts", [])) or ""
+
 
 # ---- LLM classifier ----------------------------------------------------------
 from typing import Tuple
+
 
 @retry(wait=wait_exponential(min=1, max=8), stop=stop_after_attempt(3))
 def classifier(email: Dict[str, Any]) -> Tuple[bool, str]:
@@ -165,22 +253,26 @@ def classifier(email: Dict[str, Any]) -> Tuple[bool, str]:
       1) Hard, local rules (deterministic & fast)
       2) Gemini fallback with strict JSON
     """
-    frm   = email.get("from", "")
-    subj  = (email.get("subject") or "").lower()
-    snip  = (email.get("snippet") or "").lower()
+    frm = email.get("from", "")
+    subj = (email.get("subject") or "").lower()
+    snip = (email.get("snippet") or "").lower()
 
     # --- 1) Hard rules (local)
     if sender_matches(frm, ["thegivingblock.com", "the giving block"]):
         return True, "Domain matches thegivingblock.com hard rule"
 
     survey_phrases = [
-        "rate your experience", "how did we do", "tell us about your visit",
-        "your recent purchase", "share your feedback", "survey",
+        "rate your experience",
+        "how did we do",
+        "tell us about your visit",
+        "your recent purchase",
+        "share your feedback",
+        "survey",
     ]
     if any(p in subj for p in survey_phrases) or any(p in snip for p in survey_phrases):
         return True, "Post-purchase survey / rating request"
 
-    if looks_salesy(email.get("subject",""), email.get("snippet","")):
+    if looks_salesy(email.get("subject", ""), email.get("snippet", "")):
         return True, "Sales outreach / booking language detected"
 
     # --- 2) LLM fallback (send minimal content; SYSTEM_RULES covers salesy too)
@@ -192,15 +284,35 @@ def classifier(email: Dict[str, Any]) -> Tuple[bool, str]:
         "body": body,
     }
 
-    obj = gemini_generate_json(user_email)
-    label  = (obj.get("label") or "").upper()
+    # Use configured API provider
+    if _API_PROVIDER == "openai":
+        obj = openai_generate_json(user_email)
+    else:  # default to gemini
+        obj = gemini_generate_json(user_email)
+
+    label = (obj.get("label") or "").upper()
     reason = obj.get("reason") or "Model classification"
     return (label == "SPAM", reason)
 
+
 # ---- Main --------------------------------------------------------------------
 def main():
-    global _SERVICE
+    global _SERVICE, _API_PROVIDER
+
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Gmail spam classifier using LLMs")
+    parser.add_argument(
+        "--api",
+        choices=["gemini", "openai"],
+        default="gemini",
+        help="API provider to use for classification (default: gemini)",
+    )
+    args = parser.parse_args()
+    _API_PROVIDER = args.api
+
     _SERVICE = build("gmail", "v1", credentials=get_creds())
+
+    print(f"Using {_API_PROVIDER.upper()} API for classification\n")
 
     ids = list_message_ids(_SERVICE, q="in:inbox newer_than:7d", max_results=10)
     for msg_id in ids:
