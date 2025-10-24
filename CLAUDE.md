@@ -36,6 +36,7 @@ Before running, you need:
    - `OPENAI_API_KEY=sk-xxxxxxxxxxxxx` (for OpenAI, optional)
    - `OPENAI_BASE_URL=https://api.openai.com/v1` (for OpenAI, optional - only needed for custom endpoints)
    - `OPENAI_MODEL=gpt-4o-mini` (for OpenAI, optional - defaults to gpt-4o-mini)
+   - `OPENAI_RESPONSE_FORMAT=json_object` (for OpenAI, optional - options: `json_object` (default), `json_schema` (for LM Studio), `text`, or `false`)
 
 First run creates `token.json` after OAuth authorization.
 
@@ -86,6 +87,11 @@ The classifier supports two API providers via `--api` flag:
 - Requires `OPENAI_API_KEY` in `.env`
 - Optional `OPENAI_BASE_URL` for custom endpoints (e.g., OpenAI-compatible APIs like LM Studio, Ollama with openai-compatible server, etc.)
 - Optional `OPENAI_MODEL` to specify which model to use (useful for testing different models or local models)
+- Optional `OPENAI_RESPONSE_FORMAT` to control JSON formatting:
+  - `json_object` (default): OpenAI's standard JSON mode
+  - `json_schema`: Provides explicit schema for strict validation (required by LM Studio and some local models)
+  - `text`: Plain text response (relies on regex JSON extraction)
+  - `false`: Disables response_format parameter entirely
 
 Both implementations:
 - Use `SYSTEM_RULES` for classification instructions

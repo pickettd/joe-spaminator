@@ -116,16 +116,54 @@ def openai_generate_json(payload: dict) -> dict:
     # Optional: support custom model name (default: gpt-4o-mini)
     model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
+    # Optional: configure response_format for different API backends
+    # Options: "json_object", "json_schema", "text", or "false" to disable
+    response_format_type = os.environ.get(
+        "OPENAI_RESPONSE_FORMAT", "json_object"
+    ).lower()
+
     try:
-        response = client.chat.completions.create(
-            model=model,
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[
+        params = {
+            "model": model,
+            "temperature": 0,
+            "messages": [
                 {"role": "system", "content": SYSTEM_RULES},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
-        )
+        }
+
+        if response_format_type == "json_object":
+            params["response_format"] = {"type": "json_object"}
+        elif response_format_type == "json_schema":
+            # LM Studio and some APIs require explicit schema
+            params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "spam_classification",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "label": {
+                                "type": "string",
+                                "enum": ["SPAM", "NOT_SPAM"],
+                                "description": "Classification result",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "Brief explanation (10-25 words)",
+                            },
+                        },
+                        "required": ["label", "reason"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        elif response_format_type == "text":
+            params["response_format"] = {"type": "text"}
+        # else: response_format_type == "false" or anything else, don't set response_format
+
+        response = client.chat.completions.create(**params)
 
         text = response.choices[0].message.content.strip()
         return json.loads(text)
@@ -313,7 +351,7 @@ def main():
     parser.add_argument(
         "--api",
         choices=["gemini", "openai"],
-        default="gemini",
+        default="openai",
         help="API provider to use for classification (default: gemini)",
     )
     args = parser.parse_args()
