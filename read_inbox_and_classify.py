@@ -357,7 +357,17 @@ def main():
     args = parser.parse_args()
     _API_PROVIDER = args.api
 
-    _SERVICE = build("gmail", "v1", credentials=get_creds())
+    # Determine Gmail authentication mode from environment variable
+    # Options: "file" (default) or "env"
+    gmail_auth_mode = os.environ.get("GMAIL_AUTH_MODE", "file").lower()
+    use_env_auth = gmail_auth_mode == "env"
+
+    if use_env_auth:
+        print("Using environment variable authentication (GMAIL_TOKEN_JSON)")
+    else:
+        print("Using file-based authentication (token.json)")
+
+    _SERVICE = build("gmail", "v1", credentials=get_creds(use_env=use_env_auth))
 
     print(f"Using {_API_PROVIDER.upper()} API for classification\n")
 

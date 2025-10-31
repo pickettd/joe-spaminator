@@ -30,17 +30,29 @@ pip install -r requirements.txt
 ## Required Secrets
 
 Before running, you need:
+
+### Gmail Authentication
+Choose one of two authentication modes:
+
+**File-based (default)**:
 1. `credentials.json` - Google OAuth client secret (place in repo root)
-2. `.env` file with API key(s):
+2. First run creates `token.json` after OAuth authorization
+3. Set `GMAIL_AUTH_MODE=file` in `.env` (or omit, as this is the default)
+
+**Environment variable-based**:
+1. `GMAIL_TOKEN_JSON` - Contents of token.json as a JSON string in `.env`
+2. Set `GMAIL_AUTH_MODE=env` in `.env`
+3. Useful for deployments where file access is restricted (e.g., containers, serverless)
+
+### API Keys
+Add to your `.env` file:
    - `GOOGLE_API_KEY=ya29.xxxxxxxxxxxxx` (for Gemini)
    - `OPENAI_API_KEY=sk-xxxxxxxxxxxxx` (for OpenAI, optional)
    - `OPENAI_BASE_URL=https://api.openai.com/v1` (for OpenAI, optional - only needed for custom endpoints)
    - `OPENAI_MODEL=gpt-4o-mini` (for OpenAI, optional - defaults to gpt-4o-mini)
    - `OPENAI_RESPONSE_FORMAT=json_object` (for OpenAI, optional - options: `json_object` (default), `json_schema` (for LM Studio), `text`, or `false`)
 
-First run creates `token.json` after OAuth authorization.
-
-**NEVER commit these files** - they're in `.gitignore`.
+**NEVER commit credentials.json, token.json, or .env** - they're in `.gitignore`.
 
 ## Running the Classifier
 
@@ -57,12 +69,45 @@ python read_inbox_and_classify.py --help
 
 This fetches recent inbox messages (default: `in:inbox newer_than:7d`, max 10) and classifies each as SPAM or NOT_SPAM.
 
+### Getting GMAIL_TOKEN_JSON for Environment-based Auth
+
+To use environment variable authentication:
+
+1. First, generate `token.json` using file-based auth:
+   ```bash
+   python auth_gmail.py
+   ```
+
+2. Copy the contents of `token.json` and add to `.env` as a single-line string:
+   ```bash
+   GMAIL_TOKEN_JSON='{"token": "...", "refresh_token": "...", "token_uri": "...", "client_id": "...", "client_secret": "...", "scopes": ["..."]}'
+   ```
+
+3. Set the auth mode:
+   ```bash
+   GMAIL_AUTH_MODE=env
+   ```
+
+4. Run the classifier - it will use the environment variable instead of the file.
+
 ## Code Architecture
 
 ### Authentication Flow (`auth_gmail.py`)
-- `get_creds()`: Returns valid OAuth credentials, handling refresh/reauth
+Two authentication modes available:
+
+**File-based (`get_creds_from_file`)**:
+- Uses `token.json` and `credentials.json` files
+- Handles OAuth flow, token refresh, and writes updated tokens to disk
 - Current scope: `gmail.readonly` (comment notes `gmail.modify` for label changes)
-- Creates/updates `token.json` on disk
+
+**Environment variable-based (`get_creds_from_env`)**:
+- Uses `GMAIL_TOKEN_JSON` environment variable
+- Handles token refresh and prints updated token for user to save
+- No file I/O - useful for containerized/serverless deployments
+
+**Main function (`get_creds`)**:
+- Takes `use_env` parameter (controlled by `GMAIL_AUTH_MODE` env var)
+- Routes to appropriate authentication method
 
 ### Classification Flow (`read_inbox_and_classify.py`)
 1. `list_message_ids()`: Query Gmail for message IDs
